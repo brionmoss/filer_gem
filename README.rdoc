@@ -1,6 +1,6 @@
 This is a Ruby gem for managing a NetApp filer using the OnTap API.
 
-== PREREQUISITES
+= PREREQUISITES:
 
 This gem requires the proprietary netapp-manageability-sdk-4.1 libraries to be installed.
 
@@ -9,14 +9,14 @@ This gem requires the proprietary netapp-manageability-sdk-4.1 libraries to be i
 2. unzip it
 3. cp netapp-manageability-sdk-4.1/lib/ruby/NetApp/* /usr/lib/ruby/vendor_ruby
 
-== USAGE
+= USAGE:
 
-require 'rubygems'
-require 'filer'
-f = Filer.new({"name" => "toaster95", "user" => "admin", "password" => "0h-l00k-plaintext"})
-puts "My happy filer is running #{f.version}"
-f.vol_create({"name" => "test","size" => "50g", "qtree" => "myqt","aggr" => "aggr0"})
+  require 'rubygems'
+  require 'filer'
+  f = Filer.new({"name" => "toaster95", "user" => "admin", "password" => "0h-l00k-plaintext"})
+  puts "My happy filer is running #{f.version}"
+  f.vol_create({"name" => "test","size" => "50g", "qtree" => "myqt","aggr" => "aggr0"})
 
-== AUTHOR
+= AUTHOR:
 
 Brion Moss <brion*ign.com>
