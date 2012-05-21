@@ -1,0 +1,117 @@
+#!/usr/bin/env ruby
+
+#####################################################################################
+# Settings you may wish to tweak so you get the right defaults for your environment
+
+# you can hard-code the user and password here if you're willing to have it in plaintext
+options = {
+  'reserve'    => "volume",   # volume space reserve
+  'qtype'      => 'unix',     # qtree security style
+  'disktype'   => "fast",     # disk type to look for when selecting aggregates
+  'user'       => nil,
+  'password'   => nil
+}
+
+# Keep a record of all this
+record_ticket = true
+
+# Set the default snapshot schedule based on the qtree name
+snapshot_rules = {
+  # If this is a database volume, we don't take timed snapshots
+  "db|mysql|mongo" => { 'snap_weeks' => 0, 'snap_days' => 0, 'snap_hours' => 0},
+  # Likewise for LUNs -- snapshots need to be managed host-side with snapdrive
+  "lun|images"     => { 'snap_weeks' => 0, 'snap_days' => 0, 'snap_hours' => 0},
+  # Log volumes have high churn, so don't keep a lot of snapshots
+  "logs"           => { 'snap_weeks' => 0, 'snap_days' => 1, 'snap_hours' => 6, 'snap_which' => "2,6,10,14,18,22"},
+}
+# Otherwise, use this as the default
+snapshot_default = {'snap_weeks' => 8, 'snap_days' => 10, 'snap_hours' => 24}
+
+#####################################################################################
+
+require 'rubygems'
+require 'optparse'
+require 'filer'
+
+# handle the command-line options
+optparse = OptionParser.new do|opts|
+  opts.banner = "Usage: mkvol [OPTIONS]"
+  opts.separator ""
+  opts.separator "Required options:"
+  opts.on( '-v', '--volume',      "Volume to create")         { |o| options['name'] = o     }
+  opts.on( '-f', '--filer',       "Filer name")               { |o| options['filer'] = o    }
+  opts.on( '-s', '--size',        'Volume Size')              { |o| options['size'] = o     }
+  opts.on( '-u', '--user',        'log into the filer as')    { |o| options['user'] = o     }
+  opts.on( '-p', '--password',    'log into the filer with')  { |o| options['password'] = o }
+  opts.separator ""
+  opts.separator "Aggregate options:"
+  opts.on( '-A', '--aggregate',   "Aggregate name")           { |o| options['aggr'] = o     }
+  opts.on( '-a', '--aggrtype',    "Pick an aggr of given type (fast/cheap/any) [default:fast]") { |o| options['disktype'] = o }
+  opts.on( '-g', '--noguarantee', 'Disable space guarantees') { options['reserve'] = "none" }
+  opts.separator  ""
+  opts.separator  "Create a qtree when creating the volume and (optionally) export it:"
+  opts.on( '-q', '--qtree',       'qtree to create')          { |o| options['qtree'] = o    }
+  opts.on( '-Q', '--security',    'qtree security type [default: unix]') { |o| options['qtype'] = o }
+  opts.on( '-d', '--read',        'grant NFS read access to given hosts  (colon-separated list)')  { |o| options['ro']  = o }
+  opts.on( '-w', '--write',       'grant NFS write access to given hosts (colon-separated list)')  { |o| options['rw'] = o }
+  opts.on( '-r', '--root',        'grant NFS root access to given hosts  (colon-separated list); implies write') { |o| options['root'] = o }
+  opts.separator ""
+  opts.separator "Configure a snapshot schedule:"
+  opts.on( '-H', '--snaphours',   'Number of hourly snapshots to keep') { |o| options['snap_hours'] = o }
+  opts.on( '-D', '--snapdays',    'Number of daily snapshots to keep')  { |o| options['snap_days'] = o  }
+  opts.on( '-W', '--snapweeks',   'Number of weekly snapshots to keep') { |o| options['snap_weeks'] = o }
+  opts.on( '-S', '--whichhours',  'Comma-separated list of hours at which to take snapshots') { |o| options ['snap_which'] = o }
+  opts.separator ""
+  opts.separator "Other:"
+  opts.on( '-h', '--help', 'Display command line options' )   { puts optparse; exit         }
+  if record_ticket
+    opts.on( '-R', '--ticket',      'ticket number')            { |o| options['ticket'] = o   }
+  end
+end
+optparse.parse!
+
+# check that we have the options we absolutely need
+['filer','volume','size','user','password'].each do |o|
+  if options[o].nil?
+    puts optparse
+    puts "\nFATAL -- You must specify #{o}\n"
+    exit
+  end
+end
+
+# connect to the filer
+filer = Filer.new({"name" => options['filer'], "user" => options['user'], "password" => options['password']})
+
+# create the volume
+filer.vol_create(options)
+
+## set up export rights (if requested)
+if options['ro'] or options['rw'] or options['root']
+  # if root is specified but not read or write, then let root imply write
+  if options['root'] and not (options['ro'] or options['rw'])
+    options['rw'] = options['root']
+  end
+  # The path to export is the qtree (if requested) or the top level of the volume (if no qtree)
+  if options['qtree']
+    options['path'] = "/vol/#{options['name']}/#{options['qtree']}"
+  else
+    options['path'] = "/vol/#{options['name']}/#{options['qtree']}"
+  end  
+  # add the export
+  filer.exports_add(options)
+end
+
+# set the snapshot schedule
+snapshot_sched = snapshot_default
+# First, if we have a qtree, then check if we have a rule that matches that qtree
+if params['qtree']
+  snapshot_rules.each do |patt, rules|
+    snapshot_sched = rules if params['qtree'] =~ Regexp.new("^(#{patt})$")
+  end
+end
+# Override our rules with command-line parameters, if any were passed
+["snap_hours","snap_days","snap_weeks","snap_which"].each do |s|
+  snapshot_sched[s] = params[s] if params[s]
+end
+# Now tell the filer
+filer.snap_sched(params['name'],snapshot_sched['snap_weeks'],snapshot_sched['snap_days'],snapshot_sched['snap_hours'],snapshot_sched['snap_which'])
