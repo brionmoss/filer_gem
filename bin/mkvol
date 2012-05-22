@@ -4,6 +4,7 @@
 # Settings you may wish to tweak so you get the right defaults for your environment
 
 # you can hard-code the user and password here if you're willing to have it in plaintext
+# Note that there is no way to set the qtree security style via the API, because...uh...
 options = {
   'reserve'    => "volume",   # volume space reserve
   'qtype'      => 'unix',     # qtree security style
@@ -38,40 +39,40 @@ optparse = OptionParser.new do|opts|
   opts.banner = "Usage: mkvol [OPTIONS]"
   opts.separator ""
   opts.separator "Required options:"
-  opts.on( '-v', '--volume',      "Volume to create")         { |o| options['name'] = o     }
-  opts.on( '-f', '--filer',       "Filer name")               { |o| options['filer'] = o    }
-  opts.on( '-s', '--size',        'Volume Size')              { |o| options['size'] = o     }
-  opts.on( '-u', '--user',        'log into the filer as')    { |o| options['user'] = o     }
-  opts.on( '-p', '--password',    'log into the filer with')  { |o| options['password'] = o }
+  opts.on( '-v', '--volume VOL',      "Volume to create")         { |o| options['name'] = o     }
+  opts.on( '-f', '--filer FILER',     "Filer name")               { |o| options['filer'] = o    }
+  opts.on( '-s', '--size SIZE',       'Volume Size')              { |o| options['size'] = o     }
+  opts.on( '-u', '--user NAME',       'log into the filer as')    { |o| options['user'] = o     }
+  opts.on( '-P', '--password STRING', 'log into the filer with')  { |o| options['password'] = o }
   opts.separator ""
   opts.separator "Aggregate options:"
-  opts.on( '-A', '--aggregate',   "Aggregate name")           { |o| options['aggr'] = o     }
-  opts.on( '-a', '--aggrtype',    "Pick an aggr of given type (fast/cheap/any) [default:fast]") { |o| options['disktype'] = o }
-  opts.on( '-g', '--noguarantee', 'Disable space guarantees') { options['reserve'] = "none" }
+  opts.on( '-A', '--aggregate AGGR',  "Aggregate name")           { |o| options['aggr'] = o     }
+  opts.on( '-a', '--aggrtype TYPE',   "Pick an aggr of given type (fast/cheap/any) [default:fast]") { |o| options['disktype'] = o }
+  opts.on( '-g', '--noguarantee',     'Disable space guarantees') { options['reserve'] = "none" }
   opts.separator  ""
   opts.separator  "Create a qtree when creating the volume and (optionally) export it:"
-  opts.on( '-q', '--qtree',       'qtree to create')          { |o| options['qtree'] = o    }
-  opts.on( '-Q', '--security',    'qtree security type [default: unix]') { |o| options['qtype'] = o }
-  opts.on( '-d', '--read',        'grant NFS read access to given hosts  (colon-separated list)')  { |o| options['ro']  = o }
-  opts.on( '-w', '--write',       'grant NFS write access to given hosts (colon-separated list)')  { |o| options['rw'] = o }
-  opts.on( '-r', '--root',        'grant NFS root access to given hosts  (colon-separated list); implies write') { |o| options['root'] = o }
+  opts.on( '-q', '--qtree DIR',         'qtree to create')          { |o| options['qtree'] = o    }
+  #opts.on( '-Q', '--security STYLE',    'qtree security type [default: unix]') { |o| options['qtype'] = o }
+  opts.on( '-d', '--read HOSTS',        'grant NFS read access to given hosts  (colon-separated list)')  { |o| options['ro']  = o }
+  opts.on( '-w', '--write HOSTS',       'grant NFS write access to given hosts (colon-separated list)')  { |o| options['rw'] = o }
+  opts.on( '-r', '--root HOSTS',        'grant NFS root access to given hosts  (colon-separated list); implies write') { |o| options['root'] = o }
   opts.separator ""
   opts.separator "Configure a snapshot schedule:"
-  opts.on( '-H', '--snaphours',   'Number of hourly snapshots to keep') { |o| options['snap_hours'] = o }
-  opts.on( '-D', '--snapdays',    'Number of daily snapshots to keep')  { |o| options['snap_days'] = o  }
-  opts.on( '-W', '--snapweeks',   'Number of weekly snapshots to keep') { |o| options['snap_weeks'] = o }
-  opts.on( '-S', '--whichhours',  'Comma-separated list of hours at which to take snapshots') { |o| options ['snap_which'] = o }
+  opts.on( '-H', '--snaphours COUNT',   'Number of hourly snapshots to keep') { |o| options['snap_hours'] = o }
+  opts.on( '-D', '--snapdays COUNT',    'Number of daily snapshots to keep')  { |o| options['snap_days'] = o  }
+  opts.on( '-W', '--snapweeks COUNT',   'Number of weekly snapshots to keep') { |o| options['snap_weeks'] = o }
+  opts.on( '-S', '--whichhours LIST',   'Comma-separated list of hours at which to take snapshots') { |o| options ['snap_which'] = o }
   opts.separator ""
   opts.separator "Other:"
   opts.on( '-h', '--help', 'Display command line options' )   { puts optparse; exit         }
   if record_ticket
-    opts.on( '-R', '--ticket',      'ticket number')            { |o| options['ticket'] = o   }
+    opts.on( '-R', '--ticket ID',      'ticket number')            { |o| options['ticket'] = o   }
   end
 end
 optparse.parse!
 
 # check that we have the options we absolutely need
-['filer','volume','size','user','password'].each do |o|
+['filer','name','size','user','password'].each do |o|
   if options[o].nil?
     puts optparse
     puts "\nFATAL -- You must specify #{o}\n"
@@ -104,14 +105,14 @@ end
 # set the snapshot schedule
 snapshot_sched = snapshot_default
 # First, if we have a qtree, then check if we have a rule that matches that qtree
-if params['qtree']
+if options['qtree']
   snapshot_rules.each do |patt, rules|
-    snapshot_sched = rules if params['qtree'] =~ Regexp.new("^(#{patt})$")
+    snapshot_sched = rules if options['qtree'] =~ Regexp.new("^(#{patt})$")
   end
 end
 # Override our rules with command-line parameters, if any were passed
 ["snap_hours","snap_days","snap_weeks","snap_which"].each do |s|
-  snapshot_sched[s] = params[s] if params[s]
+  snapshot_sched[s] = options[s] if options[s]
 end
 # Now tell the filer
-filer.snap_sched(params['name'],snapshot_sched['snap_weeks'],snapshot_sched['snap_days'],snapshot_sched['snap_hours'],snapshot_sched['snap_which'])
+filer.snap_sched(options['name'],snapshot_sched['snap_weeks'],snapshot_sched['snap_days'],snapshot_sched['snap_hours'],snapshot_sched['snap_which'])

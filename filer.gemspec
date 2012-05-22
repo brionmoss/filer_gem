@@ -6,7 +6,14 @@ Gem::Specification.new do |s|
   s.description = "Interface with the OnTap API to manage volumes, snapmirrors, and more."
   s.authors     = ["Brion Moss"]
   s.email       = 'brion@ign.com'
-  s.files       = ["lib/filer.rb","lib/filer_aggr.rb","lib/filer_exports.rb","lib/filer_vol.rb"]
+  s.files       = [
+    "lib/filer.rb",
+    "lib/filer_aggr.rb",
+    "lib/filer_exports.rb",
+    "lib/filer_snap.rb",
+    "lib/filer_vol.rb"
+  ]
+  s.executables = ["mkvol","snaplist"]                
   s.homepage    =
     'http://rubygems.org/gems/filer'
 end

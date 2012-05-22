@@ -1,5 +1,27 @@
 class Filer
   
+  # Get a list of volumes
+  # == Returns
+  # Array of volumes on the filer
+  def vol_list
+    volumes = []
+    iter = @filer.invoke( "volume-list-info-iter-start" )
+    if (iter.results_status() == "failed")
+      raise "Error #{iter.results_errno} listing volumes: #{iter.results_reason()}\n"
+    end
+    volcount = iter.child_get_string("records")
+    start_tag = iter.child_get_string("tag")
+    vols = @filer.invoke("volume-list-info-iter-next", "tag", start_tag, "maximum",volcount)
+    unless vols.child_get_string("records") == volcount
+      raise "Error -- problem getting full volume list.  Got #{vols.child_get_string("records")}, expected #{volcount}"
+    end
+    vols.child_get("volumes").children_get.each do |vol| 
+      volumes << vol.child_get_string("name") if vol.child_get_string("state") == "online"
+    end
+    @filer.invoke("volume-list-info-iter-end", "tag", start_tag)
+    volumes.sort
+  end
+  
   # Get information about a volume
   # == Parameters
   # Volume name (e.g. "vol0")
@@ -35,6 +57,8 @@ class Filer
   #   qtree -- a qtree to create in the volume
   #   qtype -- qtree security type (if we're creating a qtree) -- if not set leave default
   #   reserve -- specify space reservation (none/file/volume)  Defaults to volume
+  #   snap_reserve -- sets the % snapshot reserve.  Default to 0
+  #   fractional_reserve -- sets the % snapshot reserve.  Default to 0
   def vol_create(params)
     # if an aggregate has not been specified, pick one
     unless params['aggr']
@@ -44,6 +68,34 @@ class Filer
     # Retry with disktype of "any" if one wasn't specified explicitly
     unless params['aggr'] or params['disktype']
       params['aggr'] = aggr_most_avail("any")
+    end
+    # check that we got a valid size
+    unless params['size'] =~ /^(\d+)[tgm]$/
+    	puts "Invalid size specified (-s $SIZE)"
+    	puts "The size should be a number followed by a "
+    	puts "   t (terrabytes),"
+    	puts "   g (gigabytes), or "
+    	puts "   m (megabytes)"
+    	puts "For example, 150g or 500m"
+      exit
+    end
+    unless params['name'] =~ /^[A-Za-z_][A-Za-z0-9_]+$/
+      raise "Error in vol_create -- invalid volume name #{params['name']} (letters, numbers and underscore only; must begin with letter or underscore)"
+    end
+    if params['disktype'] and not ["fast","cheap","any"].include?(params['disktype'])
+      raise "Error in vol_create -- unknown disktype #{params['disktype']} (must be fast/cheap/any)"
+    end
+    if params['qtype'] and not ["unix","ntfs","mixed"].include?(params['qtype'])
+      raise "Error in vol_create -- unknown qtree security stype #{params['qtype']} (must be unix/ntfs/mixed)"
+    end
+    if params['reserve'] and not ["none","file","volume"].include?(params["reserve"])
+      raise "Error in vol_create -- unknown reserve setting #{params['reserve']} (must be volume/file/none)"
+    end
+    if params['snap_reserve'] and not (0..100) === params['snap_reserve'].to_i 
+      raise "Error in vol_create -- invalid reserve #{params['snap_reserve']} (must be number between 0 and 100)"
+    end
+    if params['fractional_reserve'] and not (0..100) === params['reserve'].to_i 
+      raise "Error in vol_create -- invalid fractional_reserve #{params['fractional_reserve']} (must be number between 0 and 100)"
     end
     
     # create the volume
@@ -65,6 +117,16 @@ class Filer
       puts "Created volume #{params['name']}"
     end
 
+    # set standard options
+    vol_option(params['name'],"no_atime_update","on")
+    vol_option(params['name'],"fractional_reserve",params['fractional_reserve'] || "0")
+
+    # set the snapshot reserve
+    output = @filer.invoke("snapshot-set-reserve","volume",params['name'],"percentage",params['snap_reserve'] || "0")
+    if (output.results_status() == "failed")
+      raise "Error #{output.results_errno} #{output.results_reason()}\n"
+    end
+    
     # create the qtree, if we want one
     if params['qtree']
       output = @filer.invoke("qtree-create","volume",params['name'],"qtree",params['qtree'])
@@ -79,11 +141,13 @@ class Filer
       end
     end
 
-    if params['qtype']
+    # There is no API call for setting qtree security style.  WTF, NetApp?
+    netapp_implements_obvious_apis = false
+    if netapp_implements_obvious_apis and params['qtype']
       output = @filer.invoke("qtree-set-security",
       "volume",params['name'],
       "qtree",params['qtree'],
-      "security",params[qtype]
+      "security",params['qtype']
       )
       if (output.results_status() == "failed")
         raise "Error #{output.results_errno} #{output.results_reason()}\n"
@@ -93,5 +157,18 @@ class Filer
     end
 
   end # def vol_create
+
+  # Set options on a volume
+  # == Parameters
+  #  volume, name, value
+  # For instance, to set no_atime_update to off on vol0
+  #  vol_option('vol0','no_atime_update','off)
+  def vol_option(volume,name,value)
+    output = @filer.invoke("volume-set-option","volume",volume,
+                           "option-name",name, "option-value",value)
+    if (output.results_status() == "failed")
+      raise "Error setting #{output.results_errno} #{output.results_reason()}\n"
+    end
+  end
 
 end

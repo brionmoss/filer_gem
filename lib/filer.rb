@@ -2,8 +2,9 @@ class Filer
 
   require 'NaServer'
   require 'filer_aggr.rb'
-  require 'filer_vol.rb'
   require 'filer_exports.rb'
+  require 'filer_snap.rb'
+  require 'filer_vol.rb'
 
   # Initialize your Filer object and establish a connection to the filer API
   #
@@ -41,6 +42,18 @@ class Filer
       output.child_get_string("version")
     end
   end # def version
+
+  # Make a generic API call
+  # CAREFUL!  This is intended for debugging/troubleshooting and should be avoided
+  def apicall(params)
+    output = @filer.invoke(params)
+    if(output.results_errno() != 0)
+      r = output.results_reason()
+      raise "Failed : \n" + r
+    else 
+      output
+    end
+  end # def apicall
 
   # Get information about this filer
   # == Returns
