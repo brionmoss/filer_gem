@@ -1,0 +1,75 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'optparse'
+require 'filer'
+
+# handle the command-line options
+options = {}
+optparse = OptionParser.new do|opts|
+  opts.banner = "Usage: snaplist [OPTIONS] filername"
+  opts.separator ""
+  opts.separator "Must specify at least one of:"
+  opts.on( '-a', '--age',            "List snapshots with their age, in days")    { options['age']    = true }
+  opts.on( '-D', '--delete',         "Delete snapshots (requires -l, -o, or -p)") { options['delete'] = true }
+  opts.on( '-m', '--morethan COUNT', "If there are more than this many snaps in a volume, delete the oldest") {|o| options['morethan'] = o.to_i }
+  opts.separator ""
+  opts.separator "Optional parameters:"
+  opts.on( '-o', '--older DAYS',     "List snapshots whose age is greater than the given number") {|o| options['olderthan'] = o.to_i }
+  opts.on( '-p', '--pattern REGEXP', "Only list snapshots that match the specified pattern")      {|o| options['pattern'] = o }
+  opts.on( '-v', '--volume VOL',     "Only list snapshots in the given volume") { |o| options['volume'] = o   }
+  opts.on( '-u', '--user NAME',      'Log into the filer as')                   { |o| options['user'] = o     }
+  opts.on( '-P', '--password STRING','Log into the filer with')                 { |o| options['password'] = o }
+  opts.on( '-n', '--dry-run',        'Do nothing, but show what would be done') { options['dryrun'] = true    }
+  opts.on( '-h', '--help',           'Display command line options' )           { puts optparse; exit         }
+end
+optparse.parse!
+
+filer = ARGV[0]
+unless filer
+  puts optparse
+  raise "\nFATAL -- You must specify the filer"
+end
+
+# connect to the filer
+filer = Filer.new({"name" => filer, "user" => options['user'], "password" => options['password']})
+
+# decide what volumes to look at
+if options['volume']
+  volumes = [options['volume']]
+else
+  volumes = filer.vol_list
+end
+
+# look at the snapshots on each volume
+snaps = {}
+volumes.each do |vol|
+  snaps = {}
+  filer.snap_list(vol).each do |name,info|
+    snaps[name] = info['time']
+    days_old = ((Time.now - info['time'])/86400).to_i
+    # skip if this snapshot doesn't match our specifications for age and/or regexp
+    next if options['olderthan'] and (options['olderthan'] > days_old)
+    next if options['pattern'] and (name !~ Regexp.new(options['pattern']))
+    # take action -- print and/or delete
+    if options['age']
+      puts "#{days_old} #{vol} #{name}"
+    end
+    if options['delete']
+      if options['dryrun']
+        puts "+ snap delete #{vol} #{name}"
+      else
+        filer.snap_delete(vol,name)
+      end
+    end
+  end
+  if options['morethan'] and (snaps.count > options['morethan'])
+    snaps.sort_by{|k,v| v}.take(snaps.count - options['morethan']).map{|a| a.first}.each do |s|
+      if options['dryrun']
+        puts "snap delete #{vol} #{s}"
+      else
+        filer.snap_delete(vol,s)
+      end
+    end
+  end
+end
